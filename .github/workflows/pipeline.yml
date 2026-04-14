@@ -32,7 +32,7 @@ jobs:
   # ============================================================
   build:
     name: Build
-    uses: ./.github/workflows/templates/template_build.yml
+    uses: ./.github/workflows/template_build.yml
     with:
       node-version: "18"
       working-directory: "."
@@ -48,7 +48,7 @@ jobs:
   test:
     name: Test
     needs: build
-    uses: ./.github/workflows/templates/template_test.yml
+    uses: ./.github/workflows/template_test.yml
     with:
       node-version: "18"
       working-directory: "."
@@ -67,7 +67,7 @@ jobs:
     name: Deploy
     needs: [build, test]
     if: github.ref_name == 'main' || github.ref_name == 'staging'
-    uses: ./.github/workflows/templates/template_deploy.yml
+    uses: ./.github/workflows/template_deploy.yml
     with:
       environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
       artifact-name: "techmarket-build"
