@@ -1,0 +1,136 @@
+# =============================================================
+# PLANTILLA REUTILIZABLE: BUILD
+# Versión: v1.0.0
+# Proyecto: TechMarket CI/CD Templates
+# Descripción: Plantilla modular para etapa de construcción
+#              (build) de aplicaciones Node.js.
+# Reutilización: uses: ./.github/workflows/templates/template_build.yml
+# =============================================================
+
+name: Template Build
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Versión de Node.js a utilizar"
+        required: false
+        type: string
+        default: "18"
+      working-directory:
+        description: "Directorio de trabajo del proyecto"
+        required: false
+        type: string
+        default: "."
+      artifact-name:
+        description: "Nombre del artefacto generado"
+        required: false
+        type: string
+        default: "build-artifact"
+      environment:
+        description: "Entorno de despliegue (dev, staging, prod)"
+        required: false
+        type: string
+        default: "dev"
+    outputs:
+      artifact-name:
+        description: "Nombre del artefacto generado por el build"
+        value: ${{ jobs.build.outputs.artifact-name }}
+      build-version:
+        description: "Versión semántica generada del build"
+        value: ${{ jobs.build.outputs.build-version }}
+    secrets:
+      NPM_TOKEN:
+        description: "Token de autenticación para NPM (opcional)"
+        required: false
+
+env:
+  # Variables de entorno comunes y parametrizables
+  NODE_ENV: ${{ inputs.environment }}
+  ARTIFACT_NAME: ${{ inputs.artifact-name }}
+
+jobs:
+  build:
+    name: "Build - ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+
+    outputs:
+      artifact-name: ${{ steps.set-outputs.outputs.artifact-name }}
+      build-version: ${{ steps.set-outputs.outputs.build-version }}
+
+    steps:
+      # -----------------------------------------------------------
+      # PASO 1: Checkout del código fuente
+      # Acción externa: actions/checkout@v4
+      # Justificación: Acción oficial de GitHub, mantenida por GitHub
+      #                Inc. Garantiza descarga segura y eficiente del
+      #                repositorio con soporte de submódulos.
+      # -----------------------------------------------------------
+      - name: Checkout del código fuente
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------
+      # PASO 2: Configurar versión de Node.js
+      # Acción externa: actions/setup-node@v4
+      # Justificación: Acción oficial de GitHub para gestionar versiones
+      #                de Node.js. Permite fijar la versión exacta y
+      #                habilitar caché de dependencias automáticamente.
+      # -----------------------------------------------------------
+      - name: Configurar Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: "npm"
+          cache-dependency-path: "${{ inputs.working-directory }}/package-lock.json"
+
+      # -----------------------------------------------------------
+      # PASO 3: Instalar dependencias
+      # -----------------------------------------------------------
+      - name: Instalar dependencias
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Instalando dependencias para entorno: $NODE_ENV"
+          npm ci
+
+      # -----------------------------------------------------------
+      # PASO 4: Ejecutar linting del código
+      # -----------------------------------------------------------
+      - name: Ejecutar linting
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Ejecutando análisis estático de código..."
+          npm run lint --if-present
+
+      # -----------------------------------------------------------
+      # PASO 5: Construir la aplicación
+      # -----------------------------------------------------------
+      - name: Construir aplicación
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Construyendo aplicación - versión semántica: v1.0.0"
+          npm run build --if-present
+
+      # -----------------------------------------------------------
+      # PASO 6: Establecer outputs del job
+      # -----------------------------------------------------------
+      - name: Establecer outputs
+        id: set-outputs
+        run: |
+          echo "artifact-name=${{ env.ARTIFACT_NAME }}" >> $GITHUB_OUTPUT
+          echo "build-version=v1.0.0" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------
+      # PASO 7: Publicar artefacto generado
+      # Acción externa: actions/upload-artifact@v4
+      # Justificación: Permite persistir artefactos entre jobs del
+      #                pipeline, evitando recompilaciones innecesarias.
+      # -----------------------------------------------------------
+      - name: Publicar artefacto de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ inputs.working-directory }}/dist
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,193 @@
+# =============================================================
+# PLANTILLA REUTILIZABLE: DEPLOY
+# Versión: v1.0.0
+# Proyecto: TechMarket CI/CD Templates
+# Descripción: Plantilla modular para etapa de despliegue (deploy)
+#              en AWS usando ECR + ECS o S3.
+# Reutilización: uses: ./.github/workflows/templates/template_deploy.yml
+# =============================================================
+
+name: Template Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Entorno de despliegue (dev, staging, prod)"
+        required: true
+        type: string
+      artifact-name:
+        description: "Nombre del artefacto a desplegar"
+        required: false
+        type: string
+        default: "build-artifact"
+      aws-region:
+        description: "Región de AWS donde se realizará el despliegue"
+        required: false
+        type: string
+        default: "us-east-1"
+      ecr-repository:
+        description: "Nombre del repositorio ECR"
+        required: false
+        type: string
+        default: "techmarket-app"
+      ecs-cluster:
+        description: "Nombre del cluster ECS"
+        required: false
+        type: string
+        default: "techmarket-cluster"
+      ecs-service:
+        description: "Nombre del servicio ECS"
+        required: false
+        type: string
+        default: "techmarket-service"
+      image-tag:
+        description: "Tag de la imagen Docker (por defecto: SHA del commit)"
+        required: false
+        type: string
+        default: "latest"
+      node-version:
+        description: "Versión de Node.js"
+        required: false
+        type: string
+        default: "18"
+    outputs:
+      deploy-url:
+        description: "URL del despliegue realizado"
+        value: ${{ jobs.deploy.outputs.deploy-url }}
+      deploy-status:
+        description: "Estado del despliegue (success/failed)"
+        value: ${{ jobs.deploy.outputs.deploy-status }}
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        description: "Access Key ID de AWS"
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: "Secret Access Key de AWS"
+        required: true
+      AWS_SESSION_TOKEN:
+        description: "Session Token de AWS (requerido en Learner Lab)"
+        required: false
+      AWS_ACCOUNT_ID:
+        description: "ID de cuenta de AWS"
+        required: true
+
+env:
+  # Variables de entorno comunes y parametrizables
+  NODE_ENV: ${{ inputs.environment }}
+  AWS_REGION: ${{ inputs.aws-region }}
+  ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+  IMAGE_TAG: ${{ inputs.image-tag == 'latest' && github.sha || inputs.image-tag }}
+
+jobs:
+  deploy:
+    name: "Deploy - ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    outputs:
+      deploy-url: ${{ steps.set-outputs.outputs.deploy-url }}
+      deploy-status: ${{ steps.set-outputs.outputs.deploy-status }}
+
+    steps:
+      # -----------------------------------------------------------
+      # PASO 1: Checkout del código fuente
+      # Acción externa: actions/checkout@v4
+      # -----------------------------------------------------------
+      - name: Checkout del código fuente
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------
+      # PASO 2: Configurar credenciales de AWS
+      # Acción externa: aws-actions/configure-aws-credentials@v4
+      # Justificación: Acción oficial de AWS que configura de forma
+      #                segura las credenciales temporales. Evita
+      #                exponer claves en variables de entorno planas.
+      #                Soporta OIDC y tokens de sesión para Learner Lab.
+      # -----------------------------------------------------------
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # -----------------------------------------------------------
+      # PASO 3: Login en Amazon ECR
+      # Acción externa: aws-actions/amazon-ecr-login@v2
+      # Justificación: Acción oficial de AWS para autenticar Docker
+      #                con ECR de forma segura y eficiente.
+      # -----------------------------------------------------------
+      - name: Login en Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # -----------------------------------------------------------
+      # PASO 4: Descargar artefacto de build
+      # Acción externa: actions/download-artifact@v4
+      # Justificación: Reutiliza el artefacto generado en la etapa
+      #                anterior para no recompilar innecesariamente.
+      # -----------------------------------------------------------
+      - name: Descargar artefacto de build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+        continue-on-error: true
+
+      # -----------------------------------------------------------
+      # PASO 5: Construir imagen Docker
+      # -----------------------------------------------------------
+      - name: Construir imagen Docker
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "Construyendo imagen Docker para entorno: $NODE_ENV"
+          FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG-$NODE_ENV"
+          echo "URI de imagen: $FULL_IMAGE_URI"
+          docker build \
+            --build-arg NODE_ENV=$NODE_ENV \
+            --build-arg BUILD_VERSION=$IMAGE_TAG \
+            -t $FULL_IMAGE_URI .
+          echo "FULL_IMAGE_URI=$FULL_IMAGE_URI" >> $GITHUB_ENV
+
+      # -----------------------------------------------------------
+      # PASO 6: Publicar imagen en ECR
+      # -----------------------------------------------------------
+      - name: Publicar imagen en ECR
+        run: |
+          echo "Publicando imagen en ECR: $FULL_IMAGE_URI"
+          docker push $FULL_IMAGE_URI
+
+      # -----------------------------------------------------------
+      # PASO 7: Actualizar servicio ECS
+      # -----------------------------------------------------------
+      - name: Actualizar servicio ECS
+        run: |
+          echo "Actualizando servicio ECS: ${{ inputs.ecs-service }}"
+          aws ecs update-service \
+            --cluster ${{ inputs.ecs-cluster }} \
+            --service ${{ inputs.ecs-service }} \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      # -----------------------------------------------------------
+      # PASO 8: Establecer outputs del despliegue
+      # -----------------------------------------------------------
+      - name: Establecer outputs
+        id: set-outputs
+        run: |
+          echo "deploy-url=https://${{ inputs.environment }}.techmarket.example.com" >> $GITHUB_OUTPUT
+          echo "deploy-status=success" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------
+      # PASO 9: Notificación de resultado
+      # -----------------------------------------------------------
+      - name: Notificar resultado del despliegue
+        if: always()
+        run: |
+          STATUS="${{ steps.set-outputs.outputs.deploy-status }}"
+          ENV="${{ inputs.environment }}"
+          echo "Despliegue en $ENV finalizado con estado: $STATUS"
+          echo "Versión desplegada: $IMAGE_TAG"

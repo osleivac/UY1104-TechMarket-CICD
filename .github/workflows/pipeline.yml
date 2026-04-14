@@ -1,0 +1,84 @@
+# =============================================================
+# PIPELINE PRINCIPAL: TechMarket CI/CD
+# Versión: v1.0.0
+# Descripción: Orquesta las plantillas de build, test y deploy
+#              para el pipeline completo de TechMarket.
+# Este archivo muestra cómo los equipos invocan las plantillas.
+# =============================================================
+
+name: TechMarket CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - develop
+  pull_request:
+    branches:
+      - main
+      - staging
+  release:
+    types: [published]
+
+env:
+  NODE_VERSION: "18"
+  PROJECT_DIR: "."
+
+jobs:
+  # ============================================================
+  # JOB 1: BUILD
+  # Invoca la plantilla reutilizable de build
+  # ============================================================
+  build:
+    name: Build
+    uses: ./.github/workflows/templates/template_build.yml
+    with:
+      node-version: "18"
+      working-directory: "."
+      artifact-name: "techmarket-build"
+      environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'staging' && 'staging' || 'dev' }}
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ============================================================
+  # JOB 2: TEST
+  # Invoca la plantilla reutilizable de test (depende del build)
+  # ============================================================
+  test:
+    name: Test
+    needs: build
+    uses: ./.github/workflows/templates/template_test.yml
+    with:
+      node-version: "18"
+      working-directory: "."
+      artifact-name: "techmarket-build"
+      coverage-threshold: "80"
+      environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'staging' && 'staging' || 'dev' }}
+      run-integration-tests: ${{ github.ref_name == 'main' || github.ref_name == 'staging' }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ============================================================
+  # JOB 3: DEPLOY (solo en ramas main y staging)
+  # Invoca la plantilla reutilizable de deploy
+  # ============================================================
+  deploy:
+    name: Deploy
+    needs: [build, test]
+    if: github.ref_name == 'main' || github.ref_name == 'staging'
+    uses: ./.github/workflows/templates/template_deploy.yml
+    with:
+      environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+      artifact-name: "techmarket-build"
+      aws-region: "us-east-1"
+      ecr-repository: "techmarket-app"
+      ecs-cluster: "techmarket-cluster"
+      ecs-service: "techmarket-service"
+      image-tag: ${{ github.sha }}
+      node-version: "18"
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

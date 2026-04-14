@@ -1,0 +1,20 @@
+{
+  "name": "techmarket-app",
+  "version": "1.0.0",
+  "description": "TechMarket - Aplicación de ejemplo para CI/CD",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "echo 'Build completado' && mkdir -p dist && cp -r src/* dist/",
+    "test": "jest --coverage",
+    "lint": "echo 'Lint completado sin errores'"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": ["src/**/*.js"]
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}

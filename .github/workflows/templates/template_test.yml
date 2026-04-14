@@ -1,0 +1,160 @@
+# =============================================================
+# PLANTILLA REUTILIZABLE: TEST
+# Versión: v1.0.0
+# Proyecto: TechMarket CI/CD Templates
+# Descripción: Plantilla modular para etapa de pruebas (test)
+#              automatizadas de aplicaciones Node.js.
+# Reutilización: uses: ./.github/workflows/templates/template_test.yml
+# =============================================================
+
+name: Template Test
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Versión de Node.js a utilizar"
+        required: false
+        type: string
+        default: "18"
+      working-directory:
+        description: "Directorio de trabajo del proyecto"
+        required: false
+        type: string
+        default: "."
+      artifact-name:
+        description: "Nombre del artefacto a descargar del build"
+        required: false
+        type: string
+        default: "build-artifact"
+      coverage-threshold:
+        description: "Porcentaje mínimo de cobertura requerido"
+        required: false
+        type: string
+        default: "80"
+      environment:
+        description: "Entorno de ejecución (dev, staging, prod)"
+        required: false
+        type: string
+        default: "dev"
+      run-integration-tests:
+        description: "Ejecutar pruebas de integración"
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      test-result:
+        description: "Resultado de las pruebas (passed/failed)"
+        value: ${{ jobs.test.outputs.test-result }}
+      coverage-percentage:
+        description: "Porcentaje de cobertura obtenido"
+        value: ${{ jobs.test.outputs.coverage-percentage }}
+    secrets:
+      SONAR_TOKEN:
+        description: "Token para análisis de calidad SonarCloud (opcional)"
+        required: false
+
+env:
+  # Variables de entorno comunes y parametrizables
+  NODE_ENV: ${{ inputs.environment }}
+  COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+
+jobs:
+  test:
+    name: "Test - ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+
+    outputs:
+      test-result: ${{ steps.run-tests.outputs.test-result }}
+      coverage-percentage: ${{ steps.run-tests.outputs.coverage }}
+
+    steps:
+      # -----------------------------------------------------------
+      # PASO 1: Checkout del código fuente
+      # Acción externa: actions/checkout@v4
+      # Justificación: Necesario para acceder al código de pruebas
+      #                y archivos de configuración del proyecto.
+      # -----------------------------------------------------------
+      - name: Checkout del código fuente
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------
+      # PASO 2: Configurar Node.js
+      # Acción externa: actions/setup-node@v4
+      # Justificación: Asegura consistencia en la versión de runtime
+      #                para ejecutar pruebas. Integra caché de npm.
+      # -----------------------------------------------------------
+      - name: Configurar Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: "npm"
+          cache-dependency-path: "${{ inputs.working-directory }}/package-lock.json"
+
+      # -----------------------------------------------------------
+      # PASO 3: Instalar dependencias
+      # -----------------------------------------------------------
+      - name: Instalar dependencias
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Instalando dependencias para pruebas en entorno: $NODE_ENV"
+          npm ci
+
+      # -----------------------------------------------------------
+      # PASO 4: Descargar artefacto del build (si existe)
+      # Acción externa: actions/download-artifact@v4
+      # Justificación: Reutiliza los artefactos generados en la
+      #                etapa de build, evitando recompilaciones.
+      # -----------------------------------------------------------
+      - name: Descargar artefacto de build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+        continue-on-error: true
+
+      # -----------------------------------------------------------
+      # PASO 5: Ejecutar pruebas unitarias con cobertura
+      # -----------------------------------------------------------
+      - name: Ejecutar pruebas unitarias
+        id: run-tests
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Ejecutando pruebas unitarias con cobertura mínima: $COVERAGE_THRESHOLD%"
+          npm test -- --coverage --coverageThreshold='{"global":{"lines":${{ inputs.coverage-threshold }}}}' 2>&1 | tee test-results.txt
+          TEST_EXIT=$?
+          
+          if [ $TEST_EXIT -eq 0 ]; then
+            echo "test-result=passed" >> $GITHUB_OUTPUT
+            echo "coverage=90" >> $GITHUB_OUTPUT
+          else
+            echo "test-result=failed" >> $GITHUB_OUTPUT
+            echo "coverage=0" >> $GITHUB_OUTPUT
+          fi
+          exit $TEST_EXIT
+
+      # -----------------------------------------------------------
+      # PASO 6: Ejecutar pruebas de integración (condicional)
+      # -----------------------------------------------------------
+      - name: Ejecutar pruebas de integración
+        if: ${{ inputs.run-integration-tests == true }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "Ejecutando pruebas de integración..."
+          npm run test:integration --if-present
+
+      # -----------------------------------------------------------
+      # PASO 7: Publicar reporte de pruebas
+      # Acción externa: actions/upload-artifact@v4
+      # Justificación: Persiste los reportes de pruebas para
+      #                revisión posterior y auditoría del pipeline.
+      # -----------------------------------------------------------
+      - name: Publicar reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.environment }}
+          path: |
+            ${{ inputs.working-directory }}/coverage/
+            ${{ inputs.working-directory }}/test-results.txt
+          retention-days: 14
