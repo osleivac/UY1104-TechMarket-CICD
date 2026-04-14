@@ -1,8 +1,6 @@
 # =============================================================
 # PLANTILLA REUTILIZABLE: INFRAESTRUCTURA (Terraform)
-# Versión: v1.0.0
-# Descripción: Crea infraestructura base con Terraform
-#              (ECR, ECS, VPC, etc.)
+# Versión: v1.1.0
 # =============================================================
 
 name: Template Infra
@@ -51,16 +49,9 @@ jobs:
       repository_url: ${{ steps.tf_output.outputs.repository_url }}
 
     steps:
-      # -----------------------------------------------------------
-      # PASO 1: Checkout
-      # -----------------------------------------------------------
       - name: Checkout codigo
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------
-      # PASO 2: Configurar credenciales AWS
-      # Accion externa: aws-actions/configure-aws-credentials@v4
-      # -----------------------------------------------------------
       - name: Configurar credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -69,38 +60,43 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ inputs.aws_region }}
 
-      # -----------------------------------------------------------
-      # PASO 3: Instalar Terraform
-      # Accion externa: hashicorp/setup-terraform@v3
-      # Justificacion: Accion oficial de HashiCorp para instalar
-      #                Terraform con version fija y verificacion
-      #                de checksums automatica.
-      # -----------------------------------------------------------
       - name: Instalar Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.6.0"
           terraform_wrapper: false
 
-      # -----------------------------------------------------------
-      # PASO 4: Inicializar Terraform
-      # -----------------------------------------------------------
       - name: Terraform Init
         working-directory: ${{ inputs.terraform_dir }}
-        run: |
-          echo "Inicializando Terraform en: ${{ inputs.terraform_dir }}"
-          terraform init
+        run: terraform init
 
-      # -----------------------------------------------------------
-      # PASO 5: Validar codigo Terraform
-      # -----------------------------------------------------------
       - name: Terraform Validate
         working-directory: ${{ inputs.terraform_dir }}
         run: terraform validate
 
-      # -----------------------------------------------------------
-      # PASO 6: Planificar cambios
-      # -----------------------------------------------------------
+      # Importar ECR si ya existe para evitar conflicto
+      - name: Importar ECR existente si aplica
+        working-directory: ${{ inputs.terraform_dir }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ inputs.aws_region }}"
+          REPO="techmarket-app"
+
+          # Verificar si el repositorio existe en AWS
+          if aws ecr describe-repositories --repository-names $REPO --region $REGION 2>/dev/null; then
+            echo "ECR existe, verificando estado de Terraform..."
+
+            # Verificar si ya está en el estado de Terraform
+            if ! terraform state show aws_ecr_repository.techmarket 2>/dev/null; then
+              echo "Importando ECR al estado de Terraform..."
+              terraform import aws_ecr_repository.techmarket $REPO
+            else
+              echo "ECR ya esta en el estado de Terraform"
+            fi
+          else
+            echo "ECR no existe, se creara en el apply"
+          fi
+
       - name: Terraform Plan
         working-directory: ${{ inputs.terraform_dir }}
         run: |
@@ -109,25 +105,11 @@ jobs:
             -var="aws_region=${{ inputs.aws_region }}" \
             -out=tfplan
 
-      # -----------------------------------------------------------
-      # PASO 7: Aplicar o destruir infraestructura
-      # -----------------------------------------------------------
       - name: Terraform Apply
         if: inputs.action == 'apply'
         working-directory: ${{ inputs.terraform_dir }}
         run: terraform apply -auto-approve tfplan
 
-      - name: Terraform Destroy
-        if: inputs.action == 'destroy'
-        working-directory: ${{ inputs.terraform_dir }}
-        run: |
-          terraform destroy -auto-approve \
-            -var="environment=${{ inputs.environment }}" \
-            -var="aws_region=${{ inputs.aws_region }}"
-
-      # -----------------------------------------------------------
-      # PASO 8: Obtener outputs de Terraform
-      # -----------------------------------------------------------
       - name: Obtener outputs
         id: tf_output
         if: inputs.action == 'apply'

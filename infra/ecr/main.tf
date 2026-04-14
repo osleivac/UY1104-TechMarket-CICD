@@ -1,7 +1,6 @@
 # =============================================================
 # INFRAESTRUCTURA: ECR Repository
 # Versión: v1.0.0
-# Descripción: Crea el repositorio ECR para TechMarket
 # =============================================================
 
 terraform {
