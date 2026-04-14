@@ -1,0 +1,138 @@
+# =============================================================
+# PLANTILLA REUTILIZABLE: INFRAESTRUCTURA (Terraform)
+# Versión: v1.0.0
+# Descripción: Crea infraestructura base con Terraform
+#              (ECR, ECS, VPC, etc.)
+# =============================================================
+
+name: Template Infra
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Entorno de despliegue"
+        required: true
+        type: string
+      aws_region:
+        description: "Region de AWS"
+        required: false
+        type: string
+        default: "us-east-1"
+      terraform_dir:
+        description: "Directorio de Terraform"
+        required: false
+        type: string
+        default: "infra/ecr"
+      action:
+        description: "Accion de Terraform: apply o destroy"
+        required: false
+        type: string
+        default: "apply"
+    outputs:
+      repository_url:
+        description: "URL del repositorio ECR creado"
+        value: ${{ jobs.terraform.outputs.repository_url }}
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+
+jobs:
+  terraform:
+    name: "Terraform - ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    outputs:
+      repository_url: ${{ steps.tf_output.outputs.repository_url }}
+
+    steps:
+      # -----------------------------------------------------------
+      # PASO 1: Checkout
+      # -----------------------------------------------------------
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------
+      # PASO 2: Configurar credenciales AWS
+      # Accion externa: aws-actions/configure-aws-credentials@v4
+      # -----------------------------------------------------------
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      # -----------------------------------------------------------
+      # PASO 3: Instalar Terraform
+      # Accion externa: hashicorp/setup-terraform@v3
+      # Justificacion: Accion oficial de HashiCorp para instalar
+      #                Terraform con version fija y verificacion
+      #                de checksums automatica.
+      # -----------------------------------------------------------
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.0"
+          terraform_wrapper: false
+
+      # -----------------------------------------------------------
+      # PASO 4: Inicializar Terraform
+      # -----------------------------------------------------------
+      - name: Terraform Init
+        working-directory: ${{ inputs.terraform_dir }}
+        run: |
+          echo "Inicializando Terraform en: ${{ inputs.terraform_dir }}"
+          terraform init
+
+      # -----------------------------------------------------------
+      # PASO 5: Validar codigo Terraform
+      # -----------------------------------------------------------
+      - name: Terraform Validate
+        working-directory: ${{ inputs.terraform_dir }}
+        run: terraform validate
+
+      # -----------------------------------------------------------
+      # PASO 6: Planificar cambios
+      # -----------------------------------------------------------
+      - name: Terraform Plan
+        working-directory: ${{ inputs.terraform_dir }}
+        run: |
+          terraform plan \
+            -var="environment=${{ inputs.environment }}" \
+            -var="aws_region=${{ inputs.aws_region }}" \
+            -out=tfplan
+
+      # -----------------------------------------------------------
+      # PASO 7: Aplicar o destruir infraestructura
+      # -----------------------------------------------------------
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: ${{ inputs.terraform_dir }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        working-directory: ${{ inputs.terraform_dir }}
+        run: |
+          terraform destroy -auto-approve \
+            -var="environment=${{ inputs.environment }}" \
+            -var="aws_region=${{ inputs.aws_region }}"
+
+      # -----------------------------------------------------------
+      # PASO 8: Obtener outputs de Terraform
+      # -----------------------------------------------------------
+      - name: Obtener outputs
+        id: tf_output
+        if: inputs.action == 'apply'
+        working-directory: ${{ inputs.terraform_dir }}
+        run: |
+          REPO_URL=$(terraform output -raw repository_url)
+          echo "repository_url=$REPO_URL" >> $GITHUB_OUTPUT
+          echo "ECR Repository URL: $REPO_URL"

@@ -1,9 +1,7 @@
 # =============================================================
 # PIPELINE PRINCIPAL: TechMarket CI/CD
-# Versión: v1.0.0
-# Descripción: Orquesta las plantillas de build, test y deploy
-#              para el pipeline completo de TechMarket.
-# Este archivo muestra cómo los equipos invocan las plantillas.
+# Versión: v1.1.0
+# Descripción: Orquesta build, test, infra y deploy
 # =============================================================
 
 name: TechMarket CI/CD Pipeline
@@ -18,17 +16,10 @@ on:
     branches:
       - main
       - staging
-  release:
-    types: [published]
-
-env:
-  NODE_VERSION: "18"
-  PROJECT_DIR: "."
 
 jobs:
   # ============================================================
   # JOB 1: BUILD
-  # Invoca la plantilla reutilizable de build
   # ============================================================
   build:
     name: Build
@@ -43,7 +34,6 @@ jobs:
 
   # ============================================================
   # JOB 2: TEST
-  # Invoca la plantilla reutilizable de test (depende del build)
   # ============================================================
   test:
     name: Test
@@ -56,16 +46,33 @@ jobs:
       coverage-threshold: "80"
       environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'staging' && 'staging' || 'dev' }}
       run-integration-tests: ${{ github.ref_name == 'main' || github.ref_name == 'staging' }}
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # ============================================================
-  # JOB 3: DEPLOY (solo en ramas main y staging)
-  # Invoca la plantilla reutilizable de deploy
+  # JOB 3: INFRAESTRUCTURA (Terraform - crea ECR)
+  # Solo en main y staging
+  # ============================================================
+  infra:
+    name: Infraestructura
+    needs: test
+    if: github.ref_name == 'main' || github.ref_name == 'staging'
+    uses: ./.github/workflows/template_infra.yml
+    with:
+      environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+      aws_region: "us-east-1"
+      terraform_dir: "infra/ecr"
+      action: "apply"
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+  # ============================================================
+  # JOB 4: DEPLOY
+  # Depende de que la infra esté lista
   # ============================================================
   deploy:
     name: Deploy
-    needs: [build, test]
+    needs: [build, test, infra]
     if: github.ref_name == 'main' || github.ref_name == 'staging'
     uses: ./.github/workflows/template_deploy.yml
     with:
