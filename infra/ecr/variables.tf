@@ -15,3 +15,15 @@ variable "environment" {
   type        = string
   default     = "prod"
 }
+
+variable "ecs_cluster_name" {
+  description = "Nombre del cluster ECS"
+  type        = string
+  default     = "techmarket-cluster"
+}
+
+variable "ecs_service_name" {
+  description = "Nombre del servicio ECS"
+  type        = string
+  default     = "techmarket-service"
+}

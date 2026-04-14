@@ -3,12 +3,12 @@ output "repository_url" {
   value       = aws_ecr_repository.techmarket.repository_url
 }
 
-output "repository_arn" {
-  description = "ARN del repositorio ECR"
-  value       = aws_ecr_repository.techmarket.arn
+output "ecs_cluster_name" {
+  description = "Nombre del cluster ECS"
+  value       = aws_ecs_cluster.techmarket.name
 }
 
-output "registry_id" {
-  description = "ID del registro ECR"
-  value       = aws_ecr_repository.techmarket.registry_id
+output "ecs_service_name" {
+  description = "Nombre del servicio ECS"
+  value       = aws_ecs_service.techmarket.name
 }
